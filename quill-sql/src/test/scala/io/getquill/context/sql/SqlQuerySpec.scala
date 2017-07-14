@@ -31,18 +31,46 @@ class SqlQuerySpec extends Spec {
         "SELECT a.s, a.i, a.l, a.o, b.s, b.i, b.l, b.o FROM TestEntity a LEFT JOIN TestEntity2 b ON (a.s IS NOT NULL) AND (b.i > a.i)"
     }
 
+    "flat outer join" in {
+      val q = quote {
+        for {
+          e1 <- qr1
+          e2 <- qr2.leftJoin(e2 => e2.i == e1.i)
+        } yield (e1.i, e2.map(e => e.i))
+      }
+      testContext.run(q.dynamic).string mustEqual
+        "SELECT e1.i, e2.i FROM TestEntity e1 LEFT JOIN TestEntity2 e2 ON e2.i = e1.i"
+    }
+
     "value query" - {
       "operation" in {
         val q = quote {
-          qr1.map(_.i).contains(1)
+          qr1.map(t => t.i).contains(1)
         }
         testContext.run(q).string mustEqual
-          "SELECT x1.* FROM (SELECT 1 IN (SELECT x1.i FROM TestEntity x1)) x1"
+          "SELECT 1 IN (SELECT t.i FROM TestEntity t)"
       }
       "simple value" in {
         val q = quote(1)
         testContext.run(q).string mustEqual
-          "SELECT x.* FROM (SELECT 1) x"
+          "SELECT 1"
+      }
+    }
+
+    "raw queries with infix" - {
+      "using tuples" in {
+        val q = quote {
+          infix"""SELECT t.s AS "_1", t.i AS "_2" FROM TestEntity t""".as[Query[(String, Int)]]
+        }
+        testContext.run(q).string mustEqual
+          """SELECT x._1, x._2 FROM (SELECT t.s AS "_1", t.i AS "_2" FROM TestEntity t) x"""
+      }
+      "using single value" in {
+        val q = quote {
+          infix"""SELECT t.i FROM TestEntity t""".as[Query[Int]]
+        }
+        testContext.run(q).string mustEqual
+          """SELECT x.* FROM (SELECT t.i FROM TestEntity t) x"""
       }
     }
 
@@ -148,7 +176,7 @@ class SqlQuerySpec extends Spec {
           qr1.groupBy(t => t.i).map(t => t._1)
         }
         testContext.run(q).string mustEqual
-          "SELECT t.* FROM (SELECT t.i FROM TestEntity t GROUP BY t.i) t"
+          "SELECT t.i FROM TestEntity t GROUP BY t.i"
       }
       "nested" in {
         val q = quote {
@@ -304,6 +332,21 @@ class SqlQuerySpec extends Spec {
         testContext.run(q).string mustEqual
           "SELECT x.s, x.i, x.l, x.o FROM (SELECT x.s, x.i, x.l, x.o FROM TestEntity x LIMIT 1) x OFFSET 2"
       }
+      "for comprehension" - {
+        val q = quote(for {
+          q1 <- qr1
+          q2 <- qr2 if q1.i == q2.i
+        } yield (q1.i, q2.i, q1.s, q2.s))
+
+        "take" in {
+          testContext.run(q.take(3)).string mustEqual
+            "SELECT q1.i, q2.i, q1.s, q2.s FROM TestEntity q1, TestEntity2 q2 WHERE q1.i = q2.i LIMIT 3"
+        }
+        "drop" in {
+          testContext.run(q.drop(3)).string mustEqual
+            "SELECT q1.i, q2.i, q1.s, q2.s FROM TestEntity q1, TestEntity2 q2 WHERE q1.i = q2.i OFFSET 3"
+        }
+      }
     }
     "set operation query" - {
       "union" in {
@@ -327,14 +370,14 @@ class SqlQuerySpec extends Spec {
           qr1.nonEmpty
         }
         testContext.run(q).string mustEqual
-          "SELECT x.* FROM (SELECT EXISTS (SELECT x.* FROM TestEntity x)) x"
+          "SELECT EXISTS (SELECT x.* FROM TestEntity x)"
       }
       "isEmpty" in {
         val q = quote {
           qr1.isEmpty
         }
         testContext.run(q).string mustEqual
-          "SELECT x.* FROM (SELECT NOT EXISTS (SELECT x.* FROM TestEntity x)) x"
+          "SELECT NOT EXISTS (SELECT x.* FROM TestEntity x)"
       }
     }
     "aggregated and mapped query" in {
@@ -356,6 +399,21 @@ class SqlQuerySpec extends Spec {
         }
         testContext.run(q).string mustEqual
           "SELECT x.s, x.i, x.l, x.o FROM (SELECT x.s, x.i, x.l, x.o FROM TestEntity x) x"
+      }
+      "pointless nesting of single yielding element" in {
+        val q = quote {
+          qr1.map(x => x.i).nested
+        }
+        testContext.run(q).string mustEqual "SELECT x.* FROM (SELECT x.i FROM TestEntity x) x"
+      }
+      "pointless nesting in for-comp of single yielding element" in {
+        val q = quote {
+          (for {
+            a <- qr1
+            b <- qr2
+          } yield a.i).nested
+        }
+        testContext.run(q).string mustEqual "SELECT x.* FROM (SELECT a.i FROM TestEntity a, TestEntity2 b) x"
       }
       "mapped" in {
         val q = quote {

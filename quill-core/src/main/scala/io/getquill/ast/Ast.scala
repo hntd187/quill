@@ -53,6 +53,8 @@ case class UnionAll(a: Ast, b: Ast) extends Query
 
 case class Join(typ: JoinType, a: Ast, b: Ast, aliasA: Ident, aliasB: Ident, on: Ast) extends Query
 
+case class FlatJoin(typ: JoinType, a: Ast, aliasA: Ident, on: Ast) extends Query
+
 case class Distinct(a: Ast) extends Query
 
 case class Nested(a: Ast) extends Query
@@ -67,7 +69,11 @@ case class Ident(name: String) extends Ast
 
 case class Property(ast: Ast, name: String) extends Ast
 
-case class OptionOperation(t: OptionOperationType, ast: Ast, alias: Ident, body: Ast) extends Ast
+sealed trait OptionOperation extends Ast
+case class OptionMap(ast: Ast, alias: Ident, body: Ast) extends OptionOperation
+case class OptionForall(ast: Ast, alias: Ident, body: Ast) extends OptionOperation
+case class OptionExists(ast: Ast, alias: Ident, body: Ast) extends OptionOperation
+case class OptionContains(ast: Ast, body: Ast) extends OptionOperation
 
 case class If(condition: Ast, `then`: Ast, `else`: Ast) extends Ast
 

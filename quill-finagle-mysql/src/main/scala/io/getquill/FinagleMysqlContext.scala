@@ -3,9 +3,6 @@ package io.getquill
 import java.util.TimeZone
 
 import scala.util.Try
-
-import org.slf4j.LoggerFactory
-
 import com.twitter.finagle.mysql.Client
 import com.twitter.finagle.mysql.LongValue
 import com.twitter.finagle.mysql.OK
@@ -13,33 +10,41 @@ import com.twitter.finagle.mysql.Parameter
 import com.twitter.finagle.mysql.Result
 import com.twitter.finagle.mysql.Row
 import com.twitter.finagle.mysql.Transactions
+import com.twitter.finagle.mysql.TimestampValue
 import com.twitter.util.Await
 import com.twitter.util.Future
 import com.twitter.util.Local
 import com.typesafe.config.Config
-import com.typesafe.scalalogging.Logger
-
 import io.getquill.context.finagle.mysql.FinagleMysqlDecoders
 import io.getquill.context.finagle.mysql.FinagleMysqlEncoders
 import io.getquill.context.finagle.mysql.SingleValueRow
 import io.getquill.context.sql.SqlContext
-import io.getquill.util.LoadConfig
+import io.getquill.util.{ ContextLogger, LoadConfig }
 import io.getquill.util.Messages.fail
 
 class FinagleMysqlContext[N <: NamingStrategy](
-  client:                             Client with Transactions,
-  private[getquill] val dateTimezone: TimeZone                 = TimeZone.getDefault
+  client:                                   Client with Transactions,
+  private[getquill] val injectionTimeZone:  TimeZone,
+  private[getquill] val extractionTimeZone: TimeZone
 )
   extends SqlContext[MySQLDialect, N]
   with FinagleMysqlDecoders
   with FinagleMysqlEncoders {
 
-  def this(config: FinagleMysqlContextConfig) = this(config.client, config.dateTimezone)
+  def this(config: FinagleMysqlContextConfig) = this(config.client, config.injectionTimeZone, config.extractionTimeZone)
   def this(config: Config) = this(FinagleMysqlContextConfig(config))
   def this(configPrefix: String) = this(LoadConfig(configPrefix))
 
-  protected val logger: Logger =
-    Logger(LoggerFactory.getLogger(classOf[FinagleMysqlContext[_]]))
+  def this(client: Client with Transactions, timeZone: TimeZone) = this(client, timeZone, timeZone)
+  def this(config: FinagleMysqlContextConfig, timeZone: TimeZone) = this(config.client, timeZone)
+  def this(config: Config, timeZone: TimeZone) = this(FinagleMysqlContextConfig(config), timeZone)
+  def this(configPrefix: String, timeZone: TimeZone) = this(LoadConfig(configPrefix), timeZone)
+
+  def this(config: FinagleMysqlContextConfig, injectionTimeZone: TimeZone, extractionTimeZone: TimeZone) = this(config.client, injectionTimeZone, extractionTimeZone)
+  def this(config: Config, injectionTimeZone: TimeZone, extractionTimeZone: TimeZone) = this(FinagleMysqlContextConfig(config), injectionTimeZone, extractionTimeZone)
+  def this(configPrefix: String, injectionTimeZone: TimeZone, extractionTimeZone: TimeZone) = this(LoadConfig(configPrefix), injectionTimeZone, extractionTimeZone)
+
+  private val logger = ContextLogger(classOf[FinagleMysqlContext[_]])
 
   override type PrepareRow = List[Parameter]
   override type ResultRow = Row
@@ -50,6 +55,12 @@ class FinagleMysqlContext[N <: NamingStrategy](
   override type RunActionReturningResult[T] = Future[T]
   override type RunBatchActionResult = Future[List[Long]]
   override type RunBatchActionReturningResult[T] = Future[List[T]]
+
+  protected val timestampValue =
+    new TimestampValue(
+      injectionTimeZone,
+      extractionTimeZone
+    )
 
   Await.result(client.ping)
 
@@ -67,23 +78,26 @@ class FinagleMysqlContext[N <: NamingStrategy](
         f.ensure(currentClient.clear)
     }
 
-  def executeQuery[T](sql: String, prepare: List[Parameter] => List[Parameter] = identity, extractor: Row => T = identity[Row] _): Future[List[T]] = {
-    logger.info(sql)
-    withClient(_.prepare(sql).select(prepare(List()): _*)(extractor)).map(_.toList)
+  def executeQuery[T](sql: String, prepare: Prepare = identityPrepare, extractor: Extractor[T] = identityExtractor): Future[List[T]] = {
+    val (params, prepared) = prepare(Nil)
+    logger.logQuery(sql, params)
+    withClient(_.prepare(sql).select(prepared: _*)(extractor)).map(_.toList)
   }
 
-  def executeQuerySingle[T](sql: String, prepare: List[Parameter] => List[Parameter] = identity, extractor: Row => T = identity[Row] _): Future[T] =
+  def executeQuerySingle[T](sql: String, prepare: Prepare = identityPrepare, extractor: Extractor[T] = identityExtractor): Future[T] =
     executeQuery(sql, prepare, extractor).map(handleSingleResult)
 
-  def executeAction[T](sql: String, prepare: List[Parameter] => List[Parameter] = identity): Future[Long] = {
-    logger.info(sql)
-    withClient(_.prepare(sql)(prepare(List()): _*))
+  def executeAction[T](sql: String, prepare: Prepare = identityPrepare): Future[Long] = {
+    val (params, prepared) = prepare(Nil)
+    logger.logQuery(sql, params)
+    withClient(_.prepare(sql)(prepared: _*))
       .map(r => toOk(r).affectedRows)
   }
 
-  def executeActionReturning[T](sql: String, prepare: List[Parameter] => List[Parameter] = identity, extractor: Row => T, returningColumn: String): Future[T] = {
-    logger.info(sql)
-    withClient(_.prepare(sql)(prepare(List()): _*))
+  def executeActionReturning[T](sql: String, prepare: Prepare = identityPrepare, extractor: Extractor[T], returningColumn: String): Future[T] = {
+    val (params, prepared) = prepare(Nil)
+    logger.logQuery(sql, params)
+    withClient(_.prepare(sql)(prepared: _*))
       .map(extractReturningValue(_, extractor))
   }
 
@@ -100,7 +114,7 @@ class FinagleMysqlContext[N <: NamingStrategy](
       }
     }.map(_.flatten.toList)
 
-  def executeBatchActionReturning[T](groups: List[BatchGroupReturning], extractor: Row => T): Future[List[T]] =
+  def executeBatchActionReturning[T](groups: List[BatchGroupReturning], extractor: Extractor[T]): Future[List[T]] =
     Future.collect {
       groups.map {
         case BatchGroupReturning(sql, column, prepare) =>
@@ -113,7 +127,7 @@ class FinagleMysqlContext[N <: NamingStrategy](
       }
     }.map(_.flatten.toList)
 
-  private def extractReturningValue[T](result: Result, extractor: Row => T) =
+  private def extractReturningValue[T](result: Result, extractor: Extractor[T]) =
     extractor(SingleValueRow(LongValue(toOk(result).insertId)))
 
   private def toOk(result: Result) =

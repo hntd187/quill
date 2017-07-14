@@ -1,40 +1,40 @@
 package io.getquill.context.finagle.mysql
 
 import java.time.{ LocalDate, LocalDateTime }
-import java.util.Date
+import java.util.{ Date, UUID }
 
-import scala.reflect.ClassTag
-import scala.reflect.classTag
 import com.twitter.finagle.mysql._
-import io.getquill.util.Messages.fail
 import io.getquill.FinagleMysqlContext
+import io.getquill.util.Messages.fail
+
+import scala.reflect.{ ClassTag, classTag }
 
 trait FinagleMysqlDecoders {
   this: FinagleMysqlContext[_] =>
 
-  protected val timestampValue =
-    new TimestampValue(
-      dateTimezone,
-      dateTimezone
-    )
+  type Decoder[T] = FinangleMysqlDecoder[T]
+
+  case class FinangleMysqlDecoder[T](decoder: BaseDecoder[T]) extends BaseDecoder[T] {
+    override def apply(index: Index, row: ResultRow) =
+      decoder(index, row)
+  }
 
   def decoder[T: ClassTag](f: PartialFunction[Value, T]): Decoder[T] =
-    new Decoder[T] {
-      def apply(index: Int, row: Row) = {
-        val value = row.values(index)
-        f.lift(value).getOrElse(fail(s"Value '$value' can't be decoded to '${classTag[T].runtimeClass}'"))
-      }
-    }
+    FinangleMysqlDecoder((index, row) => {
+      val value = row.values(index)
+      f.lift(value).getOrElse(fail(s"Value '$value' can't be decoded to '${classTag[T].runtimeClass}'"))
+    })
 
   implicit def optionDecoder[T](implicit d: Decoder[T]): Decoder[Option[T]] =
-    new Decoder[Option[T]] {
-      def apply(index: Int, row: Row) = {
-        row.values(index) match {
-          case NullValue => None
-          case other     => Some(d(index, row))
-        }
+    FinangleMysqlDecoder((index, row) => {
+      row.values(index) match {
+        case NullValue => None
+        case _         => Some(d.decoder(index, row))
       }
-    }
+    })
+
+  implicit def mappedDecoder[I, O](implicit mapped: MappedEncoding[I, O], d: Decoder[I]): Decoder[O] =
+    FinangleMysqlDecoder(mappedBaseDecoder(mapped, d.decoder))
 
   implicit val stringDecoder: Decoder[String] =
     decoder[String] {
@@ -86,6 +86,7 @@ trait FinagleMysqlDecoders {
   implicit val dateDecoder: Decoder[Date] =
     decoder[Date] {
       case `timestampValue`(v) => new Date(v.getTime)
+      case DateValue(d)        => new Date(d.getTime)
     }
 
   implicit val localDateDecoder: Decoder[LocalDate] = decoder[LocalDate] {
@@ -94,6 +95,8 @@ trait FinagleMysqlDecoders {
   }
 
   implicit val localDateTimeDecoder: Decoder[LocalDateTime] = decoder[LocalDateTime] {
-    case `timestampValue`(v) => v.toLocalDateTime
+    case `timestampValue`(v) => v.toInstant.atZone(extractionTimeZone.toZoneId).toLocalDateTime
   }
+
+  implicit val uuidDecoder: Decoder[UUID] = mappedDecoder(MappedEncoding(UUID.fromString), stringDecoder)
 }

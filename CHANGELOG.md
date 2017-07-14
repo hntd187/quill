@@ -1,9 +1,97 @@
-# To be released
+# 1.3.0
 
+- [SQLServer support](https://github.com/getquill/quill/pull/731)
+- [OrientDB support](https://github.com/getquill/quill/pull/816)
+- [Query bind variables logging](https://github.com/getquill/quill/pull/809)
+- [Add url configuration property for quill-async](https://github.com/getquill/quill/pull/821)
+- [Add support infix for batch actions](https://github.com/getquill/quill/pull/824)
+- [Better support for empty lifted queries](https://github.com/getquill/quill/pull/794)
+- [SQLLite 3.18.0](https://github.com/getquill/quill/pull/792)
+- [Fix nested query stack overflow](https://github.com/getquill/quill/pull/786)
+- [Performance optimization of Interleave](https://github.com/getquill/quill/pull/811)
+- [Performance optimization of ReifyStatement](https://github.com/getquill/quill/pull/823)
+- [Fix invalid nested queries with take/drop](https://github.com/getquill/quill/pull/779)
+- [Fix NPE when using nested quoted binding](https://github.com/getquill/quill/pull/817)
+- [Make `withConnection` method protected in AsyncContext](https://github.com/getquill/quill/pull/826)
+
+# 1.2.1
+
+- [upgrade finagle-postgres to 0.4.2](https://github.com/getquill/quill/pull/759)
+- [add collections support for row elements (SQL Arrays, Cassandra Collection)](https://github.com/getquill/quill/pull/758)
+- [allow querySchema/schemaMeta to rename optional embedded case classes](https://github.com/getquill/quill/pull/767)
+- [make Quill compatible with Scala 2.12.2](https://github.com/getquill/quill/pull/770)
+- [upgrade finagle-mysql to 6.44.0](https://github.com/getquill/quill/pull/772)
+
+# 1.1.1
+
+**see migration notes below**
+
+- [avoid dynamic query generation for option.contains](https://github.com/getquill/quill/pull/696)
+- [fix forall behaviour in quotation](https://github.com/getquill/quill/pull/699)
+- [change query compilation log level to debug](https://github.com/getquill/quill/pull/709)
+- [fix infix query compilation](https://github.com/getquill/quill/pull/711)
+- [add support for Cassandra DATE type](https://github.com/getquill/quill/pull/723)
+- [fix finagle timezone issues](https://github.com/getquill/quill/pull/722)
+- [add max prepare statement configuration](https://github.com/getquill/quill/pull/722)
+- [upgrade finagle-mysql to 6.43.0](https://github.com/getquill/quill/pull/726)
+- [fix compilation issue when import List type](https://github.com/getquill/quill/pull/735)
+- [upgrade cassandra-driver to 3.2.0](https://github.com/getquill/quill/pull/736)
+- [apply NamingStrategy to returning column](https://github.com/getquill/quill/pull/734)
+- [upgrade scala to 2.11.11](https://github.com/getquill/quill/pull/752)
+- [fix finagle mysql context constructor with timezone](https://github.com/getquill/quill/pull/744)
+- [rename Cassandra property address translater to translator](https://github.com/getquill/quill/pull/757)
+- [fix timezone handling for finagle-mysql)](https://github.com/getquill/quill/pull/754)
+
+### Migration notes
+
+- Cassandra context property `ctx.session.addressTranslater` is renamed to `ctx.session.addressTranslator`
+
+# 1.1.0
+
+**see migration notes below**
+
+- [materialize encoding for generic value classes](https://github.com/getquill/quill/pull/657)
+- [sbt option to hide debug messages during compilation](https://github.com/getquill/quill/pull/633)
+- [support Option.contains](https://github.com/getquill/quill/pull/669)
+- [recursive optional nested expanding](https://github.com/getquill/quill/pull/681)
+- [apply naming strategy to column alias](https://github.com/getquill/quill/pull/676)
+- [fix existing and add missing encoders and decoders for java.util.UUID](https://github.com/getquill/quill/pull/665)
+- [upgrade finagle-postgres to 0.3.2](https://github.com/getquill/quill/pull/692)
+
+### Migration notes
+
+- JDBC contexts are implemented in separate classes - `PostgresJdbcContext`, `MysqlJdbcContext`, `SqliteJdbcContext`, `H2JdbcContext`
+- all contexts are supplied with default `java.util.UUID` encoder and decoder
+
+# 1.0.1
+
+- [include SQL type info in Encoder/Decoder](https://github.com/getquill/quill/pull/588)
+- [make encoder helpers and wrapper type public for quill-finangle-postgres](https://github.com/getquill/quill/pull/608)
+- [fix property renaming normalization order](https://github.com/getquill/quill/pull/609)
+- [workaround compiler bug involving reflective calls](https://github.com/getquill/quill/pull/612)
+- [fix flat joins support](https://github.com/getquill/quill/pull/613)
+- [encoders and decoders refactoring](https://github.com/getquill/quill/pull/614)
+- [avoid alias conflict for multiple nested explicit joins](https://github.com/getquill/quill/pull/616)
+- [avoid merging filter condition into a groupBy.map](https://github.com/getquill/quill/pull/618)
+- [move Embedded from `io.getquill.dsl.MetaDsl` inner context to `io.getquill` package](https://github.com/getquill/quill/pull/621)
+- [make `currentConnection` protected](https://github.com/getquill/quill/pull/628)
+- [add abstract encoders/decoders to CassandraContext and uuid mirror encoder/decoder](https://github.com/getquill/quill/pull/635)
+- [made the SQL types for AsyncEncoder/AsyncDecoder generic](https://github.com/getquill/quill/pull/637)
+
+# 1.0.0-RC1 - 20-Oct-2016
+
+- [introduce `finagle-postgres`](https://github.com/getquill/quill/pull/560)
+- [introduce meta dsl](https://github.com/getquill/quill/pull/554)
+- [expand meta dsl](https://github.com/getquill/quill/pull/590)
+- [encoder for java 8 LocalDate & LocalDateTime](https://github.com/getquill/quill/pull/583)
+- [Upgraded to Monix 2.x](https://github.com/getquill/quill/pull/578)
+- [Make withClient function not private](https://github.com/getquill/quill/pull/575)
+- [pass ssl settings to async driver](https://github.com/getquill/quill/pull/587)
 
 ### Migration notes
 
 - New API for schema definition: `query[Person].schema(_.entity("people").columns(_.id -> "person_id")` becomes `querySchema[Person]("People", _.id -> "person_id")`. Note that the entity name ("People") is now always required.
+- `WrappedValue[T]` no longer exists, Quill can now automatically encode `AnyVal`s.
 
 # 0.10.0 - 5-Sep-2016
 

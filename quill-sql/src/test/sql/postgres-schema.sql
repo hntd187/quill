@@ -37,7 +37,7 @@ CREATE TABLE EncodingTestEntity(
     v11 TIMESTAMP,
     v12 VARCHAR(255),
     v13 DATE,
-    v14 TIMESTAMP,
+    v14 UUID,
     o1 VARCHAR(255),
     o2 DECIMAL(5,2),
     o3 BOOLEAN,
@@ -51,7 +51,7 @@ CREATE TABLE EncodingTestEntity(
     o11 TIMESTAMP,
     o12 VARCHAR(255),
     o13 DATE,
-    o14 TIMESTAMP
+    o14 UUID
 );
 
 CREATE TABLE EncodingUUIDTestEntity(
@@ -93,4 +93,19 @@ CREATE TABLE Barcode(
 CREATE TABLE DateEncodingTestEntity (
     v1 DATE,
     v2 TIMESTAMP
+);
+
+CREATE TABLE ArraysTestEntity (
+    texts TEXT[],
+    decimals DECIMAL(5,2)[],
+    bools BOOLEAN[],
+    bytes SMALLINT[],
+    shorts SMALLINT[],
+    ints INTEGER[],
+    longs BIGINT[],
+    floats FLOAT[],
+    doubles DOUBLE PRECISION[],
+    timestamps TIMESTAMP[],
+    dates DATE[],
+    uuids UUID[]
 );

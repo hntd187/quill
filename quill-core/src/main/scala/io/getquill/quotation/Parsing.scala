@@ -207,9 +207,8 @@ trait Parsing {
     case q"${ joinCallParser(typ, a, Some(b)) }.on(($aliasA, $aliasB) => $body)" =>
       Join(typ, a, b, identParser(aliasA), identParser(aliasB), astParser(body))
 
-    case q"${ joinCallParser(typ, a, None) }($aliasA => $body)" =>
-      val alias = identParser(aliasA)
-      Join(typ, a, a, alias, alias, astParser(body))
+    case q"${ joinCallParser(typ, a, None) }($alias => $body)" =>
+      FlatJoin(typ, a, identParser(alias), astParser(body))
 
     case q"${ joinCallParser(typ, a, b) }" =>
       c.fail("a join clause must be followed by 'on'.")
@@ -228,6 +227,8 @@ trait Parsing {
         tree match {
           case q"$a.$b" =>
             path(a) :+ b.decodedName.toString
+          case q"$a.$b.map[$_]((..$_) => $_.$c)" =>
+            path(a) ++ List(b.decodedName.toString, c.decodedName.toString)
           case _ =>
             Nil
         }
@@ -282,11 +283,13 @@ trait Parsing {
 
   val optionOperationParser: Parser[OptionOperation] = Parser[OptionOperation] {
     case q"$o.map[$t]({($alias) => $body})" if (is[Option[Any]](o)) =>
-      OptionOperation(OptionMap, astParser(o), identParser(alias), astParser(body))
+      OptionMap(astParser(o), identParser(alias), astParser(body))
     case q"$o.forall({($alias) => $body})" if (is[Option[Any]](o)) =>
-      OptionOperation(OptionForall, astParser(o), identParser(alias), astParser(body))
+      OptionForall(astParser(o), identParser(alias), astParser(body))
     case q"$o.exists({($alias) => $body})" if (is[Option[Any]](o)) =>
-      OptionOperation(OptionExists, astParser(o), identParser(alias), astParser(body))
+      OptionExists(astParser(o), identParser(alias), astParser(body))
+    case q"$o.contains[$t]($body)" if (is[Option[Any]](o)) =>
+      OptionContains(astParser(o), astParser(body))
   }
 
   val propertyParser: Parser[Ast] = Parser[Ast] {
@@ -413,7 +416,7 @@ trait Parsing {
       Delete(astParser(query))
     case q"$action.returning[$r](($alias) => $body)" =>
       Returning(astParser(action), identParser(alias), astParser(body))
-    case tree @ q"$query.foreach[$t](($alias) => $body)" if (is[CoreDsl#Query[Any]](query)) =>
+    case q"$query.foreach[$t1, $t2](($alias) => $body)($f)" if (is[CoreDsl#Query[Any]](query)) =>
       Foreach(astParser(query), identParser(alias), astParser(body))
   }
 

@@ -4,27 +4,22 @@ import com.github.mauricio.async.db.Connection
 import com.github.mauricio.async.db.{ QueryResult => DBQueryResult }
 import com.github.mauricio.async.db.RowData
 import com.github.mauricio.async.db.pool.PartitionedConnectionPool
-import com.typesafe.scalalogging.Logger
-
-import org.slf4j.LoggerFactory
-
 import scala.concurrent.Await
 import scala.concurrent.ExecutionContext
 import scala.concurrent.Future
 import scala.concurrent.duration.Duration
 import scala.util.Try
-
 import io.getquill.context.sql.SqlContext
 import io.getquill.context.sql.idiom.SqlIdiom
 import io.getquill.NamingStrategy
+import io.getquill.util.ContextLogger
 
 abstract class AsyncContext[D <: SqlIdiom, N <: NamingStrategy, C <: Connection](pool: PartitionedConnectionPool[C])
   extends SqlContext[D, N]
   with Decoders
   with Encoders {
 
-  private val logger: Logger =
-    Logger(LoggerFactory.getLogger(classOf[AsyncContext[_, _, _]]))
+  private val logger = ContextLogger(classOf[AsyncContext[_, _, _]])
 
   override type PrepareRow = List[Any]
   override type ResultRow = RowData
@@ -41,13 +36,13 @@ abstract class AsyncContext[D <: SqlIdiom, N <: NamingStrategy, C <: Connection]
     ()
   }
 
-  private def withConnection[T](f: Connection => Future[T])(implicit ec: ExecutionContext) =
+  protected def withConnection[T](f: Connection => Future[T])(implicit ec: ExecutionContext) =
     ec match {
       case TransactionalExecutionContext(ec, conn) => f(conn)
       case other                                   => f(pool)
     }
 
-  protected def extractActionResult[O](returningColumn: String, extractor: RowData => O)(result: DBQueryResult): O
+  protected def extractActionResult[O](returningColumn: String, extractor: Extractor[O])(result: DBQueryResult): O
 
   protected def expandAction(sql: String, returningColumn: String) = sql
 
@@ -61,28 +56,31 @@ abstract class AsyncContext[D <: SqlIdiom, N <: NamingStrategy, C <: Connection]
       f(TransactionalExecutionContext(ec, c))
     }
 
-  def executeQuery[T](sql: String, prepare: List[Any] => List[Any] = identity, extractor: RowData => T = identity[RowData] _)(implicit ec: ExecutionContext): Future[List[T]] = {
-    logger.info(sql)
-    withConnection(_.sendPreparedStatement(sql, prepare(List()))).map {
+  def executeQuery[T](sql: String, prepare: Prepare = identityPrepare, extractor: Extractor[T] = identityExtractor)(implicit ec: ExecutionContext): Future[List[T]] = {
+    val (params, values) = prepare(Nil)
+    logger.logQuery(sql, params)
+    withConnection(_.sendPreparedStatement(sql, values)).map {
       _.rows match {
         case Some(rows) => rows.map(extractor).toList
-        case None       => List()
+        case None       => Nil
       }
     }
   }
 
-  def executeQuerySingle[T](sql: String, prepare: List[Any] => List[Any] = identity, extractor: RowData => T = identity[RowData] _)(implicit ec: ExecutionContext): Future[T] =
+  def executeQuerySingle[T](sql: String, prepare: Prepare = identityPrepare, extractor: Extractor[T] = identityExtractor)(implicit ec: ExecutionContext): Future[T] =
     executeQuery(sql, prepare, extractor).map(handleSingleResult)
 
-  def executeAction[T](sql: String, prepare: List[Any] => List[Any] = identity)(implicit ec: ExecutionContext): Future[Long] = {
-    logger.info(sql)
-    withConnection(_.sendPreparedStatement(sql, prepare(List()))).map(_.rowsAffected)
+  def executeAction[T](sql: String, prepare: Prepare = identityPrepare)(implicit ec: ExecutionContext): Future[Long] = {
+    val (params, values) = prepare(Nil)
+    logger.logQuery(sql, params)
+    withConnection(_.sendPreparedStatement(sql, values)).map(_.rowsAffected)
   }
 
-  def executeActionReturning[T](sql: String, prepare: List[Any] => List[Any] = identity, extractor: RowData => T, returningColumn: String)(implicit ec: ExecutionContext): Future[T] = {
+  def executeActionReturning[T](sql: String, prepare: Prepare = identityPrepare, extractor: Extractor[T], returningColumn: String)(implicit ec: ExecutionContext): Future[T] = {
     val expanded = expandAction(sql, returningColumn)
-    logger.info(expanded)
-    withConnection(_.sendPreparedStatement(expanded, prepare(List())))
+    val (params, values) = prepare(Nil)
+    logger.logQuery(sql, params)
+    withConnection(_.sendPreparedStatement(expanded, values))
       .map(extractActionResult(returningColumn, extractor))
   }
 
@@ -99,7 +97,7 @@ abstract class AsyncContext[D <: SqlIdiom, N <: NamingStrategy, C <: Connection]
       }
     }.map(_.flatten.toList)
 
-  def executeBatchActionReturning[T](groups: List[BatchGroupReturning], extractor: RowData => T)(implicit ec: ExecutionContext): Future[List[T]] =
+  def executeBatchActionReturning[T](groups: List[BatchGroupReturning], extractor: Extractor[T])(implicit ec: ExecutionContext): Future[List[T]] =
     Future.sequence {
       groups.map {
         case BatchGroupReturning(sql, column, prepare) =>

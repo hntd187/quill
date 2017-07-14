@@ -2,6 +2,7 @@ package io.getquill
 
 import io.getquill.ast._
 import io.getquill.idiom.Idiom
+import io.getquill.idiom.SetContainsToken
 import io.getquill.idiom.Statement
 import io.getquill.idiom.StatementInterpolator._
 import io.getquill.norm.Normalize
@@ -14,8 +15,6 @@ class MirrorIdiom extends Idiom {
   override def prepareForProbing(string: String) = string
 
   override def liftingPlaceholder(index: Int): String = "?"
-
-  override def emptyQuery = ""
 
   override def translate(ast: Ast)(implicit naming: NamingStrategy): (Ast, Statement) = {
     val normalizedAst = Normalize(ast)
@@ -99,6 +98,9 @@ class MirrorIdiom extends Idiom {
     case Join(t, a, b, iA, iB, on) =>
       stmt"${a.token}.${t.token}(${b.token}).on((${iA.token}, ${iB.token}) => ${on.token})"
 
+    case FlatJoin(t, a, iA, on) =>
+      stmt"${a.token}.${t.token}((${iA.token}) => ${on.token})"
+
     case Distinct(a) =>
       stmt"${a.token}.distinct"
 
@@ -117,13 +119,10 @@ class MirrorIdiom extends Idiom {
   }
 
   implicit def optionOperationTokenizer(implicit liftTokenizer: Tokenizer[Lift]): Tokenizer[OptionOperation] = Tokenizer[OptionOperation] {
-    case q: OptionOperation =>
-      val method = q.t match {
-        case OptionMap    => "map"
-        case OptionForall => "forall"
-        case OptionExists => "exists"
-      }
-      stmt"${q.ast.token}.${method.token}((${q.alias.token}) => ${q.body.token})"
+    case OptionMap(ast, alias, body)    => stmt"${ast.token}.map((${alias.token}) => ${body.token})"
+    case OptionForall(ast, alias, body) => stmt"${ast.token}.forall((${alias.token}) => ${body.token})"
+    case OptionExists(ast, alias, body) => stmt"${ast.token}.exists((${alias.token}) => ${body.token})"
+    case OptionContains(ast, body)      => stmt"${ast.token}.contains(${body.token})"
   }
 
   implicit val joinTypeTokenizer: Tokenizer[JoinType] = Tokenizer[JoinType] {
@@ -138,10 +137,11 @@ class MirrorIdiom extends Idiom {
   }
 
   implicit def operationTokenizer(implicit liftTokenizer: Tokenizer[Lift]): Tokenizer[Operation] = Tokenizer[Operation] {
-    case UnaryOperation(op: PrefixUnaryOperator, ast)  => stmt"${op.token}${scopedTokenizer(ast)}"
-    case UnaryOperation(op: PostfixUnaryOperator, ast) => stmt"${scopedTokenizer(ast)}.${op.token}"
-    case BinaryOperation(a, op, b)                     => stmt"${scopedTokenizer(a)} ${op.token} ${scopedTokenizer(b)}"
-    case FunctionApply(function, values)               => stmt"${scopedTokenizer(function)}.apply(${values.token})"
+    case UnaryOperation(op: PrefixUnaryOperator, ast)       => stmt"${op.token}${scopedTokenizer(ast)}"
+    case UnaryOperation(op: PostfixUnaryOperator, ast)      => stmt"${scopedTokenizer(ast)}.${op.token}"
+    case BinaryOperation(a, op @ SetOperator.`contains`, b) => SetContainsToken(scopedTokenizer(b), op.token, a.token)
+    case BinaryOperation(a, op, b)                          => stmt"${scopedTokenizer(a)} ${op.token} ${scopedTokenizer(b)}"
+    case FunctionApply(function, values)                    => stmt"${scopedTokenizer(function)}.apply(${values.token})"
   }
 
   implicit def operatorTokenizer[T <: Operator]: Tokenizer[T] = Tokenizer[T] {
@@ -169,7 +169,7 @@ class MirrorIdiom extends Idiom {
     case Insert(query, assignments)    => stmt"${query.token}.insert(${assignments.token})"
     case Delete(query)                 => stmt"${query.token}.delete"
     case Returning(query, alias, body) => stmt"${query.token}.returning((${alias.token}) => ${body.token})"
-    case Foreach(query, alias, body)   => stmt"${query.token}.forach((${alias.token}) => ${body.token})"
+    case Foreach(query, alias, body)   => stmt"${query.token}.foreach((${alias.token}) => ${body.token})"
   }
 
   implicit def assignmentTokenizer(implicit liftTokenizer: Tokenizer[Lift]): Tokenizer[Assignment] = Tokenizer[Assignment] {

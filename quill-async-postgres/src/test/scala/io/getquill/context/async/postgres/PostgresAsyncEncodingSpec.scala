@@ -23,7 +23,7 @@ class PostgresAsyncEncodingSpec extends EncodingSpec {
         result <- testContext.run(query[EncodingTestEntity])
       } yield result
 
-    verify(Await.result(r, Duration.Inf).toList)
+    verify(Await.result(r, Duration.Inf))
   }
 
   "encodes and decodes uuids" in {
@@ -79,7 +79,7 @@ class PostgresAsyncEncodingSpec extends EncodingSpec {
 
   "returning UUID" in {
     val success = for {
-      uuid <- Await.result(testContext.run(insertBarCode.apply(lift(barCodeEntry))), Duration.Inf)
+      uuid <- Await.result(testContext.run(insertBarCode(lift(barCodeEntry))), Duration.Inf)
       barCode <- Await.result(testContext.run(findBarCodeByUuid(uuid)), Duration.Inf).headOption
     } yield {
       verifyBarcode(barCode)
@@ -89,7 +89,7 @@ class PostgresAsyncEncodingSpec extends EncodingSpec {
 
   "encodes localdate type" in {
     case class DateEncodingTestEntity(v1: LocalDate, v2: LocalDate)
-    val entity = new DateEncodingTestEntity(LocalDate.now, LocalDate.now)
+    val entity = DateEncodingTestEntity(LocalDate.now, LocalDate.now)
     val r = for {
       _ <- testContext.run(query[DateEncodingTestEntity].delete)
       _ <- testContext.run(query[DateEncodingTestEntity].insert(lift(entity)))
@@ -100,12 +100,27 @@ class PostgresAsyncEncodingSpec extends EncodingSpec {
 
   "encodes localdatetime type" in {
     case class DateEncodingTestEntity(v1: LocalDateTime, v2: LocalDateTime)
-    val entity = new DateEncodingTestEntity(LocalDateTime.now, LocalDateTime.now)
+    val entity = DateEncodingTestEntity(LocalDateTime.now, LocalDateTime.now)
     val r = for {
       _ <- testContext.run(query[DateEncodingTestEntity].delete)
       _ <- testContext.run(query[DateEncodingTestEntity].insert(lift(entity)))
       result <- testContext.run(query[DateEncodingTestEntity])
     } yield result
     Await.result(r, Duration.Inf)
+  }
+
+  "encodes custom type inside singleton object" in {
+    object Singleton {
+      def apply()(implicit c: TestContext) = {
+        import c._
+        for {
+          _ <- c.run(query[EncodingTestEntity].delete)
+          result <- c.run(liftQuery(insertValues).foreach(e => query[EncodingTestEntity].insert(e)))
+        } yield result
+      }
+    }
+
+    implicit val c = testContext
+    Await.result(Singleton(), Duration.Inf)
   }
 }

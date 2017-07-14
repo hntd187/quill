@@ -4,13 +4,14 @@ import scala.math.BigDecimal.double2bigDecimal
 import scala.math.BigDecimal.int2bigDecimal
 import scala.math.BigDecimal.javaBigDecimal2bigDecimal
 import scala.math.BigDecimal.long2bigDecimal
-
 import io.getquill.Spec
 import io.getquill.ast.{ Query => _, _ }
 import io.getquill.testContext._
-import io.getquill.context.WrappedEncodable
+import io.getquill.context.ValueClass
+import io.getquill.util.Messages
 
 case class CustomAnyValue(i: Int) extends AnyVal
+case class EmbeddedValue(s: String, i: Int) extends Embedded
 
 class QuotationSpec extends Spec {
 
@@ -32,6 +33,20 @@ class QuotationSpec extends Spec {
             querySchema[TestEntity]("SomeAlias", _.s -> "theS", _.i -> "theI")
           }
           quote(unquote(q)).ast mustEqual Entity("SomeAlias", List(PropertyAlias(List("s"), "theS"), PropertyAlias(List("i"), "theI")))
+        }
+        "with embedded property alias" in {
+          case class TestEnt(ev: EmbeddedValue)
+          val q = quote {
+            querySchema[TestEnt]("SomeAlias", _.ev.s -> "theS", _.ev.i -> "theI")
+          }
+          quote(unquote(q)).ast mustEqual Entity("SomeAlias", List(PropertyAlias(List("ev", "s"), "theS"), PropertyAlias(List("ev", "i"), "theI")))
+        }
+        "with embedded option property alias" in {
+          case class TestEnt(ev: Option[EmbeddedValue])
+          val q = quote {
+            querySchema[TestEnt]("SomeAlias", _.ev.map(_.s) -> "theS", _.ev.map(_.i) -> "theI")
+          }
+          quote(unquote(q)).ast mustEqual Entity("SomeAlias", List(PropertyAlias(List("ev", "s"), "theS"), PropertyAlias(List("ev", "i"), "theI")))
         }
         "explicit `Predef.ArrowAssoc`" in {
           val q = quote {
@@ -337,6 +352,17 @@ class QuotationSpec extends Spec {
           }
           quote(unquote(q)).ast mustEqual
             Foreach(ScalarQueryLift("q.list", list, intEncoder), Ident("i"), delete.ast.body)
+        }
+        "batch with Quoted[Action[T]]" in {
+          case class TestEntity(id: Int)
+          val list = List(
+            TestEntity(1),
+            TestEntity(2)
+          )
+          val insert = quote((row: TestEntity) => query[TestEntity].insert(row))
+          val q = quote(liftQuery(list).foreach(row => quote(insert(row))))
+          quote(unquote(q)).ast mustEqual
+            Foreach(CaseClassQueryLift("q.list", list), Ident("row"), insert.ast.body)
         }
         "unicode arrow must compile" in {
           """|quote {
@@ -670,19 +696,25 @@ class QuotationSpec extends Spec {
         val q = quote {
           (o: Option[Int]) => o.map(v => v)
         }
-        quote(unquote(q)).ast.body mustEqual OptionOperation(OptionMap, Ident("o"), Ident("v"), Ident("v"))
+        quote(unquote(q)).ast.body mustEqual OptionMap(Ident("o"), Ident("v"), Ident("v"))
       }
       "forall" in {
         val q = quote {
           (o: Option[Boolean]) => o.forall(v => v)
         }
-        quote(unquote(q)).ast.body mustEqual OptionOperation(OptionForall, Ident("o"), Ident("v"), Ident("v"))
+        quote(unquote(q)).ast.body mustEqual OptionForall(Ident("o"), Ident("v"), Ident("v"))
       }
       "exists" in {
         val q = quote {
           (o: Option[Boolean]) => o.exists(v => v)
         }
-        quote(unquote(q)).ast.body mustEqual OptionOperation(OptionExists, Ident("o"), Ident("v"), Ident("v"))
+        quote(unquote(q)).ast.body mustEqual OptionExists(Ident("o"), Ident("v"), Ident("v"))
+      }
+      "contains" in {
+        val q = quote {
+          (o: Option[Boolean], v: Int) => o.contains(v)
+        }
+        quote(unquote(q)).ast.body mustEqual OptionContains(Ident("o"), Ident("v"))
       }
     }
     "boxed numbers" - {
@@ -705,6 +737,7 @@ class QuotationSpec extends Spec {
           quote(unquote(q)).ast match {
             case Function(params, Tuple(values)) =>
               values mustEqual params
+            case _ => Messages.fail("Should not happen")
           }
         }
         "java to scala" in {
@@ -718,6 +751,7 @@ class QuotationSpec extends Spec {
           quote(unquote(q)).ast match {
             case Function(params, Tuple(values)) =>
               values mustEqual params
+            case _ => Messages.fail("Should not happen")
           }
         }
       }
@@ -826,8 +860,8 @@ class QuotationSpec extends Spec {
         l.encoder mustEqual intEncoder
       }
       "property" in {
-        case class Test(a: String)
-        val t = Test("a")
+        case class TestEntity(a: String)
+        val t = TestEntity("a")
         val q = quote(lift(t.a))
 
         val l = q.liftings.`t.a`
@@ -835,8 +869,9 @@ class QuotationSpec extends Spec {
         l.encoder mustEqual stringEncoder
       }
       "abritrary" in {
-        val q = quote(lift(String.valueOf(1)))
-        q.liftings.`java.this.lang.String.valueOf(1)`.value mustEqual String.valueOf(1)
+        class A { def x = 1 }
+        val q = quote(lift(new A().x))
+        q.liftings.`new A().x`.value mustEqual new A().x
       }
       "duplicate" in {
         val i = 1
@@ -890,6 +925,17 @@ class QuotationSpec extends Spec {
         val l = q2.liftings.`q1.1`
         l.value mustEqual 1
         l.encoder mustEqual intEncoder
+      }
+      "embedded" in {
+        case class EmbeddedTestEntity(id: String) extends Embedded
+        case class TestEntity(embedded: EmbeddedTestEntity)
+        val t = TestEntity(EmbeddedTestEntity("test"))
+        val q = quote {
+          query[TestEntity].insert(lift(t))
+        }
+        q.liftings.`t.embedded.id`.value mustEqual t.embedded.id
+        val q2 = quote(q)
+        q2.liftings.`q.t.embedded.id`.value mustEqual t.embedded.id
       }
       "merges properties into the case class lifting" - {
         val t = TestEntity("s", 1, 2L, Some(3))
@@ -955,14 +1001,14 @@ class QuotationSpec extends Spec {
       }
     }
 
-    "supports WrappedValue" in {
-      def q(v: WrappedEncodable) = quote {
+    "supports value class" in {
+      def q(v: ValueClass) = quote {
         lift(v)
       }
-      q(WrappedEncodable(1)).liftings.`v`.value mustEqual WrappedEncodable(1)
+      q(ValueClass(1)).liftings.`v`.value mustEqual ValueClass(1)
     }
 
-    "supports custom anyval" in {
+    "supports custom AnyVal" in {
       def q(v: CustomAnyValue) = quote {
         lift(v)
       }
@@ -1077,5 +1123,13 @@ class QuotationSpec extends Spec {
       else q2
 
     quote(unquote(q)).ast mustEqual q2.ast
+  }
+
+  // nested quotation with lifting compiles as a type member
+  def quote1(i: Int) = quote {
+    qr1.filter(_.i == lift(i))
+  }
+  def quote2 = quote {
+    quote1(1)
   }
 }

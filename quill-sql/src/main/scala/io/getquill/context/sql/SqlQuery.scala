@@ -12,6 +12,7 @@ case class TableContext(entity: Entity, alias: String) extends FromContext
 case class QueryContext(query: SqlQuery, alias: String) extends FromContext
 case class InfixContext(infix: Infix, alias: String) extends FromContext
 case class JoinContext(t: JoinType, a: FromContext, b: FromContext, on: Ast) extends FromContext
+case class FlatJoinContext(t: JoinType, a: FromContext, on: Ast) extends FromContext
 
 sealed trait SqlQuery
 
@@ -44,24 +45,36 @@ case class FlattenSqlQuery(
 )
   extends SqlQuery
 
+object TakeDropFlatten {
+  def unapply(q: Query): Option[(Query, Option[Ast], Option[Ast])] = q match {
+    case Take(q: FlatMap, n) => Some((q, Some(n), None))
+    case Drop(q: FlatMap, n) => Some((q, None, Some(n)))
+    case _                   => None
+  }
+}
+
 object SqlQuery {
 
   def apply(query: Ast): SqlQuery =
     query match {
-      case Union(a, b)                  => SetOperationSqlQuery(apply(a), UnionOperation, apply(b))
-      case UnionAll(a, b)               => SetOperationSqlQuery(apply(a), UnionAllOperation, apply(b))
-      case UnaryOperation(op, q: Query) => UnaryOperationSqlQuery(op, apply(q))
-      case _: Operation | _: Value      => FlattenSqlQuery(select = List(SelectValue(query)))
-      case q: Query                     => flatten(q, "x")
-      case other                        => fail(s"Query not properly normalized. Please open a bug report. Ast: '$other'")
+      case Union(a, b)                          => SetOperationSqlQuery(apply(a), UnionOperation, apply(b))
+      case UnionAll(a, b)                       => SetOperationSqlQuery(apply(a), UnionAllOperation, apply(b))
+      case UnaryOperation(op, q: Query)         => UnaryOperationSqlQuery(op, apply(q))
+      case _: Operation | _: Value              => FlattenSqlQuery(select = List(SelectValue(query)))
+      case map @ Map(_: Nested, a, b) if a == b => flatten(map, a.name)
+      case Map(q, a, b) if a == b               => apply(q)
+      case TakeDropFlatten(q, limit, offset)    => flatten(q, "x").copy(limit = limit, offset = offset)
+      case q: Query                             => flatten(q, "x")
+      case infix: Infix                         => flatten(infix, "x")
+      case other                                => fail(s"Query not properly normalized. Please open a bug report. Ast: '$other'")
     }
 
-  private def flatten(query: Query, alias: String): FlattenSqlQuery = {
+  private def flatten(query: Ast, alias: String): FlattenSqlQuery = {
     val (sources, finalFlatMapBody) = flattenContexts(query)
     flatten(sources, finalFlatMapBody, alias)
   }
 
-  private def flattenContexts(query: Query): (List[FromContext], Query) =
+  private def flattenContexts(query: Ast): (List[FromContext], Ast) =
     query match {
       case FlatMap(q: Query, Ident(alias), p: Query) =>
         val source = this.source(q, alias)
@@ -190,6 +203,7 @@ object SqlQuery {
       case entity: Entity            => TableContext(entity, alias)
       case infix: Infix              => InfixContext(infix, alias)
       case Join(t, a, b, ia, ib, on) => JoinContext(t, source(a, ia.name), source(b, ib.name), on)
+      case FlatJoin(t, a, ia, on)    => FlatJoinContext(t, source(a, ia.name), on)
       case other                     => QueryContext(apply(other), alias)
     }
 

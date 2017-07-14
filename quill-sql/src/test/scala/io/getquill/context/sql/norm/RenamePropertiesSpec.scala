@@ -62,13 +62,24 @@ class RenamePropertiesSpec extends Spec {
         testContext.run(q).string mustEqual
           "SELECT u.s, u.i, u.l, u.o FROM test_entity t, TestEntity2 u WHERE u.s = t.field_s"
       }
-      "transitive" in pendingUntilFixed {
+      "transitive" in {
         val q = quote {
           e.flatMap(t => qr2.map(u => t)).map(t => t.s)
         }
         testContext.run(q.dynamic).string mustEqual
           "SELECT t.field_s FROM test_entity t, TestEntity2 u"
-        ()
+      }
+      "with filter" in {
+        val q = quote {
+          for {
+            a <- e
+            b <- qr2 if (a.s == b.s)
+          } yield {
+            (a, b)
+          }
+        }
+        testContext.run(q).string mustEqual
+          "SELECT a.field_s, a.field_i, a.l, a.o, b.s, b.i, b.l, b.o FROM test_entity a, TestEntity2 b WHERE a.field_s = b.s"
       }
     }
     "map" - {
@@ -216,6 +227,23 @@ class RenamePropertiesSpec extends Spec {
         }
         testContext.run(q).string mustEqual
           "SELECT x.bC FROM A x"
+      }
+    }
+    "query for Option embeddeds" - {
+      "without schema" in {
+        case class B(c1: Int, c2: Int) extends Embedded
+        case class A(b: Option[B])
+        testContext.run(query[A]).string mustEqual
+          "SELECT x.c1, x.c2 FROM A x"
+      }
+      "with schema" in {
+        case class B(c1: Int, c2: Int) extends Embedded
+        case class A(b: Option[B])
+        val q = quote {
+          querySchema[A]("A", _.b.map(_.c1) -> "bC1", _.b.map(_.c2) -> "bC2")
+        }
+        testContext.run(q).string mustEqual
+          "SELECT x.bC1, x.bC2 FROM A x"
       }
     }
     "update" - {

@@ -37,7 +37,7 @@ CREATE TABLE EncodingTestEntity(
     v11 DATETIME,
     v12 VARCHAR(255),
     v13 DATE,
-    v14 DATETIME,
+    v14 VARCHAR(255),
     o1 VARCHAR(255),
     o2 DECIMAL(5,2),
     o3 BOOLEAN,
@@ -51,13 +51,18 @@ CREATE TABLE EncodingTestEntity(
     o11 DATETIME,
     o12 VARCHAR(255),
     o13 DATE,
-    o14 DATETIME
+    o14 VARCHAR(255)
 );
 
 Create TABLE DateEncodingTestEntity(
     v1 date,
     v2 datetime,
     v3 timestamp
+);
+
+Create TABLE LocalDateTimeEncodingTestEntity(
+    v1 datetime,
+    v2 timestamp
 );
 
 Create TABLE BooleanEncodingTestEntity(

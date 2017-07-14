@@ -1,30 +1,35 @@
 package io.getquill.context.mirror
 
 import java.time.LocalDate
-import java.util.Date
+import java.util.{ Date, UUID }
 
-import io.getquill.context.Context
+import io.getquill.MirrorContext
 
 import scala.reflect.ClassTag
 
 trait MirrorDecoders {
-  this: Context[_, _] =>
+  this: MirrorContext[_, _] =>
 
-  type ResultRow = Row
+  override type Decoder[T] = MirrorDecoder[T]
 
-  def decoder[T: ClassTag]: Decoder[T] = new Decoder[T] {
-    def apply(index: Int, row: Row) =
-      row[T](index)
+  case class MirrorDecoder[T](decoder: BaseDecoder[T]) extends BaseDecoder[T] {
+    override def apply(index: Index, row: ResultRow) =
+      decoder(index, row)
   }
 
+  def decoder[T: ClassTag]: Decoder[T] = MirrorDecoder((index: Index, row: ResultRow) => row[T](index))
+
+  def decoderUnsafe[T]: Decoder[T] = MirrorDecoder((index: Index, row: ResultRow) => row.data(index).asInstanceOf[T])
+
+  implicit def mappedDecoder[I, O](implicit mapped: MappedEncoding[I, O], d: Decoder[I]): Decoder[O] =
+    MirrorDecoder((index: Index, row: ResultRow) => mapped.f(d.apply(index, row)))
+
   implicit def optionDecoder[T](implicit d: Decoder[T]): Decoder[Option[T]] =
-    new Decoder[Option[T]] {
-      def apply(index: Int, row: Row) =
-        row[Option[Any]](index) match {
-          case Some(v) => Some(d(0, Row(v)))
-          case None    => None
-        }
-    }
+    MirrorDecoder((index: Index, row: ResultRow) =>
+      row[Option[Any]](index) match {
+        case Some(v) => Some(d(0, Row(v)))
+        case None    => None
+      })
 
   implicit val stringDecoder: Decoder[String] = decoder[String]
   implicit val bigDecimalDecoder: Decoder[BigDecimal] = decoder[BigDecimal]
@@ -38,4 +43,5 @@ trait MirrorDecoders {
   implicit val byteArrayDecoder: Decoder[Array[Byte]] = decoder[Array[Byte]]
   implicit val dateDecoder: Decoder[Date] = decoder[Date]
   implicit val localDateDecoder: Decoder[LocalDate] = decoder[LocalDate]
+  implicit val uuidDecoder: Decoder[UUID] = decoder[UUID]
 }

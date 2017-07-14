@@ -183,6 +183,16 @@ class SqlIdiomSpec extends Spec {
           testContext.run(q).string mustEqual
             "SELECT t._1, t._2 FROM (SELECT t.i _1, MIN(t.l) _2 FROM TestEntity t GROUP BY t.i) t LIMIT 10"
         }
+        "filter.flatMap(groupBy)" in {
+          val q = quote {
+            for {
+              a <- qr1 if a.i == 1
+              b <- qr2.groupBy(t => t.i).map { case _ => 1 }
+            } yield b
+          }
+          testContext.run(q).string mustEqual
+            "SELECT t.* FROM TestEntity a, (SELECT 1 FROM TestEntity2 t GROUP BY t.i) t WHERE a.i = 1"
+        }
       }
       "aggregated" - {
         "min" in {
@@ -245,11 +255,11 @@ class SqlIdiomSpec extends Spec {
       "unary operation" - {
         "nonEmpty" in {
           testContext.run(qr1.nonEmpty).string mustEqual
-            "SELECT x.* FROM (SELECT EXISTS (SELECT x.* FROM TestEntity x)) x"
+            "SELECT EXISTS (SELECT x.* FROM TestEntity x)"
         }
         "isEmpty" in {
           testContext.run(qr1.isEmpty).string mustEqual
-            "SELECT x.* FROM (SELECT NOT EXISTS (SELECT x.* FROM TestEntity x)) x"
+            "SELECT NOT EXISTS (SELECT x.* FROM TestEntity x)"
         }
       }
       "limited" - {
@@ -347,7 +357,7 @@ class SqlIdiomSpec extends Spec {
             qr1.leftJoin(qr2).on((a, b) => a.s == b.s).leftJoin(qr2).on((a, b) => a._1.s == b.s).map(_._1._1)
           }
           testContext.run(q).string mustEqual
-            "SELECT a.s, a.i, a.l, a.o FROM TestEntity a LEFT JOIN TestEntity2 b ON a.s = b.s LEFT JOIN TestEntity2 b ON a.s = b.s"
+            "SELECT a.s, a.i, a.l, a.o FROM TestEntity a LEFT JOIN TestEntity2 b ON a.s = b.s LEFT JOIN TestEntity2 b1 ON a.s = b1.s"
         }
         "with flatMap" - {
           "left" ignore {
@@ -371,7 +381,7 @@ class SqlIdiomSpec extends Spec {
           qr1.map(t => t.i).size == 1L
         }
         testContext.run(q).string mustEqual
-          "SELECT x.* FROM (SELECT (SELECT COUNT(t.i) FROM TestEntity t) = 1) x"
+          "SELECT (SELECT COUNT(t.i) FROM TestEntity t) = 1"
       }
     }
     "operations" - {
@@ -570,6 +580,13 @@ class SqlIdiomSpec extends Spec {
           testContext.run(q).string mustEqual
             "SELECT t.s, t.i, t.l, t.o FROM TestEntity t WHERE (t.i % t.l) = 0"
         }
+        "forall" in {
+          val q = quote {
+            qr1.filter(t => t.i != 1 && t.o.forall(op => op == 1))
+          }
+          testContext.run(q).string mustEqual
+            "SELECT t.s, t.i, t.l, t.o FROM TestEntity t WHERE (t.i <> 1) AND ((t.o IS NULL) OR (t.o = 1))"
+        }
         "contains" - {
           "query" in {
             val q = quote {
@@ -578,6 +595,28 @@ class SqlIdiomSpec extends Spec {
             testContext.run(q).string mustEqual
               "SELECT t.s, t.i, t.l, t.o FROM TestEntity t WHERE t.i IN (SELECT p.i FROM TestEntity2 p)"
           }
+          "option" in {
+            val q = quote {
+              qr1.filter(t => t.o.contains(1))
+            }
+            testContext.run(q).string mustEqual
+              "SELECT t.s, t.i, t.l, t.o FROM TestEntity t WHERE t.o = 1"
+          }
+          "set" - {
+            "non-empty" in {
+              val q = quote {
+                qr1.filter(t => liftQuery(Set(1, 2, 3)).contains(t.i))
+              }
+              testContext.run(q).string mustEqual "SELECT t.s, t.i, t.l, t.o FROM TestEntity t WHERE t.i IN (?, ?, ?)"
+            }
+            "empty" in {
+              val q = quote {
+                qr1.filter(t => liftQuery(Set.empty[Int]).contains(t.i))
+              }
+              testContext.run(q).string mustEqual "SELECT t.s, t.i, t.l, t.o FROM TestEntity t WHERE FALSE"
+            }
+          }
+
         }
       }
     }

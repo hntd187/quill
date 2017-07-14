@@ -5,6 +5,7 @@ import io.getquill.ast._
 import io.getquill.quotation.ReifyLiftings
 import io.getquill.util.Messages._
 import io.getquill.norm.BetaReduction
+import io.getquill.util.EnableReflectiveCalls
 
 class ActionMacro(val c: MacroContext)
   extends ContextMacro
@@ -14,6 +15,7 @@ class ActionMacro(val c: MacroContext)
   def runAction(quoted: Tree): Tree =
     c.untypecheck {
       q"""
+        ..${EnableReflectiveCalls(c)}
         val expanded = ${expand(extractAst(quoted))}
         ${c.prefix}.executeAction(
           expanded.string,
@@ -25,6 +27,7 @@ class ActionMacro(val c: MacroContext)
   def runActionReturning[T](quoted: Tree)(implicit t: WeakTypeTag[T]): Tree =
     c.untypecheck {
       q"""
+        ..${EnableReflectiveCalls(c)}
         val expanded = ${expand(extractAst(quoted))}
         ${c.prefix}.executeActionReturning(
           expanded.string,
@@ -39,13 +42,14 @@ class ActionMacro(val c: MacroContext)
     expandBatchAction(quoted) {
       case (batch, param, expanded) =>
         q"""
+          ..${EnableReflectiveCalls(c)}
           ${c.prefix}.executeBatchAction(
             $batch.map { $param => 
               val expanded = $expanded
               (expanded.string, expanded.prepare)
             }.groupBy(_._1).map {
               case (string, items) =>
-                ${c.prefix}.BatchGroup(string, items.map(_._2))
+                ${c.prefix}.BatchGroup(string, items.map(_._2).toList)
             }.toList
           )
         """
@@ -55,13 +59,14 @@ class ActionMacro(val c: MacroContext)
     expandBatchAction(quoted) {
       case (batch, param, expanded) =>
         q"""
+          ..${EnableReflectiveCalls(c)}
           ${c.prefix}.executeBatchActionReturning(
             $batch.map { $param => 
               val expanded = $expanded
               ((expanded.string, $returningColumn), expanded.prepare)
             }.groupBy(_._1).map {
               case ((string, column), items) =>
-                ${c.prefix}.BatchGroupReturning(string, column, items.map(_._2))
+                ${c.prefix}.BatchGroupReturning(string, column, items.map(_._2).toList)
             }.toList,
             ${returningExtractor[T]}
           )
@@ -95,7 +100,7 @@ class ActionMacro(val c: MacroContext)
     q"""
       expanded.ast match {
         case io.getquill.ast.Returning(_, _, io.getquill.ast.Property(_, property)) => 
-          property
+          expanded.naming.column(property)
         case ast => 
           io.getquill.util.Messages.fail(s"Can't find returning column. Ast: '$$ast'")
       }
